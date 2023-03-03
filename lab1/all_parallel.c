@@ -3,11 +3,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+
+
 #define N 5000
 #define EPSILON 1E-7
 #define TAU 1E-5
 #define MAX_ITERATION_COUNT 100000
 
+void copy_vector(double* dest, const double* src, int size)
+{
+    for (int i = 0; i < size; i++)
+        dest[i] = src[i];
+}
 
 void generate_A_chunk(double* A_chunk, int line_count, int line_size, int lineIndex)
 {
@@ -57,7 +64,7 @@ double calc_norm_square(const double* vector, int size)
 }
 
 void calc_Axb(const double* A_chunk, const double* x_chunk, const double* b_chunk, double* recv_x_chunk,
-              double* Axb_chunk, int* line_counts, const int* line_offsets, int process_rank, int process_count)
+    double* Axb_chunk, int* line_counts, const int* line_offsets, int process_rank, int process_count)
 {
     int src_rank = (process_rank + process_count - 1) % process_count;
     int dest_rank = (process_rank + 1) % process_count;
@@ -78,7 +85,7 @@ void calc_Axb(const double* A_chunk, const double* x_chunk, const double* b_chun
 
         if (i != process_count - 1)
             MPI_Sendrecv_replace(recv_x_chunk, line_counts[0], MPI_DOUBLE, dest_rank, process_rank,
-                                 src_rank, src_rank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                src_rank, src_rank, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
     }
 }
 
@@ -88,16 +95,12 @@ void calc_next_x(const double* Axb_chunk, double* x_chunk, double tau, int chunk
         x_chunk[i] -= tau * Axb_chunk[i];
 }
 
-void copy_vector(double* dest, const double* src, int size)
-{
-    for (int i = 0; i < size; i++)
-        dest[i] = src[i];
-}
+
 
 int main(int argc, char** argv)
 {
     int process_rank;
-    int process_count;
+    int process_count; 
     int iter_count;
     double b_chunk_norm;
     double b_norm;
@@ -120,38 +123,38 @@ int main(int argc, char** argv)
     MPI_Comm_size(MPI_COMM_WORLD, &process_count);
     MPI_Comm_rank(MPI_COMM_WORLD, &process_rank);
 
-    line_counts = malloc(sizeof(int) * process_count);
-    line_offsets = malloc(sizeof(int) * process_count);
+    line_counts = (int*)malloc(sizeof(int) * process_count);
+    line_offsets = (int*) malloc(sizeof(int) * process_count);
     set_matrix_part(line_counts, line_offsets, N, process_count);
 
-    x_chunk = malloc(sizeof(double) * line_counts[process_rank]);
-    b_chunk = malloc(sizeof(double) * line_counts[process_rank]);
-    A_chunk = malloc(sizeof(double) * line_counts[process_rank] * N);
+    x_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank]);
+    b_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank]);
+    A_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank] * N);
     generate_x_chunk(x_chunk, line_counts[process_rank]);
     generate_b_chunk(b_chunk, line_counts[process_rank]);
     generate_A_chunk(A_chunk, line_counts[process_rank], N, line_offsets[process_rank]);
 
     b_chunk_norm = calc_norm_square(b_chunk, line_counts[process_rank]);
     MPI_Reduce(&b_chunk_norm, &b_norm, 1, MPI_DOUBLE,
-               MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_SUM, 0, MPI_COMM_WORLD);
     if (process_rank == 0)
         b_norm = sqrt(b_norm);
 
-    Axb_chunk = malloc(sizeof(double) * line_counts[process_rank]);
-    recv_x_chunk = malloc(sizeof(double) * line_counts[0]);
+    Axb_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank]);
+    recv_x_chunk = (double*) malloc(sizeof(double) * line_counts[0]);
 
     start_time = MPI_Wtime();
 
     for (iter_count = 0; accuracy > EPSILON && iter_count < MAX_ITERATION_COUNT; ++iter_count)
     {
         calc_Axb(A_chunk, x_chunk, b_chunk, recv_x_chunk, Axb_chunk,
-                 line_counts, line_offsets, process_rank, process_count);
+            line_counts, line_offsets, process_rank, process_count);
 
         calc_next_x(Axb_chunk, x_chunk, TAU, line_counts[process_rank]);
 
         Axb_chunk_norm_square = calc_norm_square(Axb_chunk, line_counts[process_rank]);
         MPI_Reduce(&Axb_chunk_norm_square, &accuracy, 1,
-                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+            MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         if (process_rank == 0)
             accuracy = sqrt(accuracy) / b_norm;
         MPI_Bcast(&accuracy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -161,7 +164,7 @@ int main(int argc, char** argv)
 
     x_chunk_norm = calc_norm_square(x_chunk, line_counts[process_rank]);
     MPI_Reduce(&x_chunk_norm, &x_norm, 1, MPI_DOUBLE,
-               MPI_SUM, 0, MPI_COMM_WORLD);
+        MPI_SUM, 0, MPI_COMM_WORLD);
     if (process_rank == 0)
     {
         if (iter_count == MAX_ITERATION_COUNT)
@@ -179,7 +182,7 @@ int main(int argc, char** argv)
     free(b_chunk);
     free(A_chunk);
     free(Axb_chunk);
-
+    
     MPI_Finalize();
 
     return 0;
