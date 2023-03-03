@@ -4,12 +4,12 @@
 #include <stdlib.h>
 
 #define N 5000
-#define EPSILON 1E-7
+#define EPSILON 1E-5 //0,000001
 #define TAU 1E-5
 #define MAX_ITERATION_COUNT 100000
 
 
-void generate_A_chunks(double *A_chunk, int line_count, int line_size, int lineIndex)
+void generate_A_chunks(double* A_chunk, int line_count, int line_size, int lineIndex)
 {
     for (int i = 0; i < line_count; i++)
     {
@@ -20,13 +20,13 @@ void generate_A_chunks(double *A_chunk, int line_count, int line_size, int lineI
     }
 }
 
-void generate_x(double *x, int size)
+void generate_x(double* x, int size)
 {
     for (int i = 0; i < size; i++)
         x[i] = 0;
 }
 
-void generate_b(double *b, int size)
+void generate_b(double* b, int size)
 {
     for (int i = 0; i < size; i++)
         b[i] = N + 1;
@@ -47,7 +47,7 @@ void set_matrix_part(int* line_counts, int* line_offsets, int size, int process_
     }
 }
 
-double calc_norm_square(const double *vector, int size)
+double calc_norm_square(const double* vector, int size)
 {
     double norm_square = 0.0;
     for (int i = 0; i < size; ++i)
@@ -73,8 +73,9 @@ void calc_next_x(const double* Axb_chunk, const double* x, double* x_chunk, doub
 }
 
 
-int main(int argc, char **argv)
+int main(int argc, char** argv)
 {
+
     int process_rank;
     int process_count;
     int iter_count;
@@ -90,42 +91,46 @@ int main(int argc, char **argv)
     double* Axb_chunk;
     double* x_chunk;
 
-    MPI_Init(&argc, &argv); //Первая процедура предназначения для инициализации параллельной части программы
+    MPI_Init(&argc, &argv); 
 
-    MPI_Comm_size(MPI_COMM_WORLD, &process_count);  //количество потоков, обрабатывающих программу
-    MPI_Comm_rank(MPI_COMM_WORLD, &process_rank);  //номер конкретного процесс
+    MPI_Comm_size(MPI_COMM_WORLD, &process_count);  
+    MPI_Comm_rank(MPI_COMM_WORLD, &process_rank); 
 
-    line_counts = malloc(sizeof(int) * process_count);
-    line_offsets = malloc(sizeof(int) * process_count);
+
+    printf("  : %d  \n", process_count);
+
+    line_counts = (int*) malloc(sizeof(int) * process_count);
+    line_offsets = (int*) malloc(sizeof(int) * process_count);
     set_matrix_part(line_counts, line_offsets, N, process_count);
 
-    A_chunk = malloc(sizeof(double) * line_counts[process_rank] * N);
-    x = malloc(sizeof(double) * N);
-    b = malloc(sizeof(double) * N);
+    A_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank] * N);
+    x = (double*) malloc(sizeof(double) * N);
+    b = (double*) malloc(sizeof(double) * N);
     generate_A_chunks(A_chunk, line_counts[process_rank], N, line_offsets[process_rank]);
+
     generate_x(x, N);
     generate_b(b, N);
 
     if (process_rank == 0)
         b_norm = sqrt(calc_norm_square(b, N));
 
-    Axb_chunk = malloc(sizeof(double) * line_counts[process_rank]);
-    x_chunk = malloc(sizeof(double) * line_counts[process_rank]);
+    Axb_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank]);
+    x_chunk = (double*) malloc(sizeof(double) * line_counts[process_rank]);
 
     start_time = MPI_Wtime();
 
     for (iter_count = 0; accuracy > EPSILON && iter_count < MAX_ITERATION_COUNT; ++iter_count)
     {
         calc_Axb(A_chunk, x, b, Axb_chunk,
-                 line_counts[process_rank], line_offsets[process_rank]);
+            line_counts[process_rank], line_offsets[process_rank]);
 
         calc_next_x(Axb_chunk, x, x_chunk, TAU, line_counts[process_rank], line_offsets[process_rank]);
         MPI_Allgatherv(x_chunk, line_counts[process_rank], MPI_DOUBLE,
-                       x, line_counts, line_offsets, MPI_DOUBLE, MPI_COMM_WORLD);
+            x, line_counts, line_offsets, MPI_DOUBLE, MPI_COMM_WORLD);
 
         double Axb_chunk_norm_square = calc_norm_square(Axb_chunk, line_counts[process_rank]);
         MPI_Reduce(&Axb_chunk_norm_square, &accuracy, 1,
-                   MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+            MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         if (process_rank == 0)
             accuracy = sqrt(accuracy) / b_norm;
         MPI_Bcast(&accuracy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
@@ -156,3 +161,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
+
