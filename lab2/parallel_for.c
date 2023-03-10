@@ -108,7 +108,7 @@ int main(int argc, char* argv[]) {
 	double time_start, time_end;
 	time_start = omp_get_wtime();
 	result = calculate(matrix, vector);
-    time_end = omp_get_wtime();
+        time_end = omp_get_wtime();
 
 	print_vector(result);
 
