@@ -1,3 +1,8 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <omp.h>
+
+#define EPSILON 0.00001
 #define TAU  0.00001
 
 #define N 1024
@@ -106,7 +111,7 @@ int main(int argc, char* argv[]) {
 
     printf("Norm sqrt: %lf\n", norm_square);
     printf("Time: %lf sec\n", time_end - time_start);
-    
+
 
     free(matrix);
     free(vector);
@@ -114,4 +119,3 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
