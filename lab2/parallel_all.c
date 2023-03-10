@@ -1,8 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <omp.h>
-
-#define EPSILON 0.00001
 #define TAU  0.00001
 
 #define N 1024
@@ -19,7 +14,7 @@ double* create_matrix() {
     return chunk;
 }
 
-double* create_vector() {
+double* create_b() {
     double* vector = (double*) calloc(N, sizeof(double));
     for (int i = 0; i < N; i++) {
         vector[i] = N + 1;
@@ -28,14 +23,8 @@ double* create_vector() {
 }
 
 
-void print_vector(double* vector) {
-    for (int i = 0; i < N; i++) {
-        printf("%0.4f\n", vector[i]);
-    }
-}
-
 double* calculate(const double* matrix, const double* vector) {
-    int j, offset;
+    int j;
     double* result = (double*) calloc(N, sizeof(double));
     double vector_squared_norm = 0;
     double Axb_squared_norm = 0;
@@ -59,7 +48,6 @@ double* calculate(const double* matrix, const double* vector) {
             // Ax
 #pragma omp for schedule(static, N/THREADS)
             for (int i = 0; i < N; i++) {
-                offset = N * i;
                 for (j = 0; j < N; j++) {
                     Ax[i] += matrix[N * i + j] * result[j];
                 }
@@ -103,7 +91,7 @@ double* calculate(const double* matrix, const double* vector) {
 int main(int argc, char* argv[]) {
 
     double* matrix = create_matrix();
-    double* vector = create_vector();
+    double* vector = create_b();
     double* result;
 
     double time_start, time_end;
@@ -111,8 +99,14 @@ int main(int argc, char* argv[]) {
     time_start = omp_get_wtime();
     result = calculate(matrix, vector);
     time_end = omp_get_wtime();
-    print_vector(result);
-    printf("%f\n", time_end - time_start);
+
+    double norm_square = 0.0;
+    for (int i = 0; i < N; ++i)
+        norm_square += result[i] * result[i];
+
+    printf("Norm sqrt: %lf\n", norm_square);
+    printf("Time: %lf sec\n", time_end - time_start);
+    
 
     free(matrix);
     free(vector);
@@ -120,5 +114,4 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
 
