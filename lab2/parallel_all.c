@@ -40,7 +40,7 @@ double* calculate(const double* matrix, const double* vector) {
         vector_squared_norm += vector[i] * vector[i];
     }
     int not_finished = 1;
-#pragma omp parallel private(j) shared(not_finished, y_squared_norm)
+#pragma omp parallel private(j) shared(not_finished, Axb_squared_norm)
     {
         while (not_finished) {
 #pragma omp single
@@ -64,7 +64,7 @@ double* calculate(const double* matrix, const double* vector) {
                 Axb[i] = Ax[i] - vector[i];
             }
 
-#pragma parallel for reduction(+:y_squared_norm)
+#pragma parallel for reduction(+:Axb_squared_norm)
             for (int i = 0; i < N; i++) {
                 Axb_squared_norm += Axb[i] * Axb[i];
             }
