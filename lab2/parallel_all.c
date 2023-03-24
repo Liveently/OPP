@@ -5,7 +5,7 @@
 #define EPSILON 0.00001
 #define TAU  0.00001
 
-#define N 1024
+#define N 5000
 
 
 double* create_matrix() {
