@@ -7,7 +7,6 @@
 
 #define N 1024
 
-int THREADS=4;
 
 double* create_matrix() {
     double* chunk = (double*) calloc(N*N, sizeof(double));
@@ -27,7 +26,6 @@ double* create_b() {
     return vector;
 }
 
-
 double* calculate(const double* matrix, const double* vector) {
     int j;
     double* result = (double*) calloc(N, sizeof(double));
@@ -43,7 +41,6 @@ double* calculate(const double* matrix, const double* vector) {
     int not_finished = 1;
 
 
-
 #pragma omp parallel private(j) shared(not_finished, Axb_squared_norm, Ax, Axb, v)
     {
         while (not_finished) {
@@ -57,7 +54,7 @@ double* calculate(const double* matrix, const double* vector) {
                 Axb_squared_norm = 0;
             }
             // Ax
-#pragma omp for schedule(static, N/THREADS)
+#pragma omp for schedule(static)
             for (int i = 0; i < N; i++) {
                 for (j = 0; j < N; j++) {
                     Ax[i] += matrix[N * i + j] * result[j];
@@ -65,11 +62,10 @@ double* calculate(const double* matrix, const double* vector) {
             }
 
             // Ax - b
-#pragma omp for schedule(static, N/THREADS)
+#pragma omp for schedule(static)
             for (int i = 0; i < N; i++) {
                 Axb[i] = Ax[i] - vector[i];
             }
-
 #pragma parallel for reduction(+:Axb_squared_norm)
             for (int i = 0; i < N; i++) {
                 Axb_squared_norm += Axb[i] * Axb[i];
@@ -81,18 +77,16 @@ double* calculate(const double* matrix, const double* vector) {
                 free(v);
                 not_finished = 0;
             }
-
             if (not_finished) {
                 // t(Ax - b)
-#pragma omp for schedule(static, N/THREADS)
+#pragma omp for schedule(static)
                 for (int i = 0; i < N; i++) {
                     v [i] = TAU * Axb[i];
                 }
                 // x - t(Ax - b)
-#pragma omp for schedule(static, N/THREADS)
+#pragma omp for schedule(static)
                 for (int i = 0; i < N; i++) {
                     result[i] = result[i] - v[i];
-
                 }
             }
         }
@@ -117,7 +111,6 @@ int main(int argc, char* argv[]) {
 
     printf("Norm sqrt: %lf\n", norm_square);
     printf("Time: %lf sec\n", time_end - time_start);
-
 
     free(matrix);
     free(vector);
