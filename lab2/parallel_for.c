@@ -5,7 +5,7 @@
 #define EPSILON 0.00001
 #define TAU  0.00001
 
-#define N 1024
+#define N 7000
 
 
 double* create_matrix() {
@@ -49,36 +49,40 @@ double* calculate(const double* matrix, const double* b) {
     int j, offset;
     double* result = (double*) calloc(N, sizeof(double));
     double vector_squared_norm = calc_norm_square(b, N);
-    double y_squared_norm = 0;
+    double Axb_squared_norm = 0;
 
 
     int not_finished = 1;
 
+
+    double* Ax = (double*) calloc(N, sizeof(double));
+    double* Axb = (double*) calloc(N, sizeof(double));
+    double* v = (double*) calloc(N, sizeof(double));
+
+
     while (not_finished) {
-        double* u = (double*) calloc(N, sizeof(double));
-        double* y = (double*) calloc(N, sizeof(double));
-        double* v = (double*) calloc(N, sizeof(double));
+
         // Ax
 #pragma omp parallel for private(j, offset)
         for (int i = 0; i < N; i++) {
             offset = N * i;
             for (j = 0; j < N; j++) {
-                u[i] += matrix[offset + j] * result[j];
+                Ax[i] += matrix[offset + j] * result[j];
             }
         }
 
         // Ax - b
 #pragma parallel for
         for (int i = 0; i < N; i++) {
-            y[i] = u[i] - b[i];
+            Axb[i] = Ax[i] - b[i];
         }
 
-        y_squared_norm = calc_norm_square(y, N);
+        Axb_squared_norm = calc_norm_square(Axb, N);
 
 
-        if (y_squared_norm/vector_squared_norm < EPSILON*EPSILON) {
-            free(u);
-            free(y);
+        if (Axb_squared_norm / vector_squared_norm < EPSILON * EPSILON) {
+            free(Ax);
+            free(Axb);
             free(v);
             not_finished = 0;
         }
@@ -87,13 +91,20 @@ double* calculate(const double* matrix, const double* b) {
             // t(Ax - b)
 #pragma parallel for
             for (int i = 0; i < N; i++) {
-                v[i] = TAU * y[i];
+                v[i] = TAU * Axb[i];
             }
             // x - t(Ax - b)
 #pragma parallel for
             for (int i = 0; i < N; i++) {
                 result[i] = result[i] - v[i];
             }
+
+            for (int i = 0; i < N; i++) {
+                Ax[i] = 0;
+                Axb[i] = 0;
+                v[i] = 0;
+            }
+
         }
     }
     return result;
@@ -101,23 +112,25 @@ double* calculate(const double* matrix, const double* b) {
 
 int main(int argc, char* argv[]) {
 
-	double* matrix = create_matrix();
-	double* vector = create_vector();
-	double* result;
+    double* matrix = create_matrix();
+    double* vector = create_vector();
+    double* result;
 
-	double time_start, time_end;
-	time_start = omp_get_wtime();
-	result = calculate(matrix, vector);
-        time_end = omp_get_wtime();
+    double time_start, time_end;
+    time_start = omp_get_wtime();
+    result = calculate(matrix, vector);
+    time_end = omp_get_wtime();
 
-	print_vector(result);
+    double norm_square = 0.0;
+    for (int i = 0; i < N; ++i)
+        norm_square += result[i] * result[i];
 
-	printf("%f\n", time_end - time_start);
+    printf("Norm sqrt: %lf\n", norm_square);
+    printf("Time: %lf sec\n", time_end - time_start);
 
-	free(matrix);
-	free(vector);
-	free(result);
+    free(matrix);
+    free(vector);
+    free(result);
 
-	return 0;
+    return 0;
 }
-
