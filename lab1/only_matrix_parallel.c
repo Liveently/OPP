@@ -97,8 +97,6 @@ int main(int argc, char** argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &process_rank); 
 
 
-    printf("  : %d  \n", process_count);
-
     line_counts = (int*) malloc(sizeof(int) * process_count);
     line_offsets = (int*) malloc(sizeof(int) * process_count);
     set_matrix_part(line_counts, line_offsets, N, process_count);
@@ -126,14 +124,14 @@ int main(int argc, char** argv)
 
         calc_next_x(Axb_chunk, x, x_chunk, TAU, line_counts[process_rank], line_offsets[process_rank]);
         MPI_Allgatherv(x_chunk, line_counts[process_rank], MPI_DOUBLE,
-            x, line_counts, line_offsets, MPI_DOUBLE, MPI_COMM_WORLD);
+            x, line_counts, line_offsets, MPI_DOUBLE, MPI_COMM_WORLD); //Собирает переменный объем данных от каждого члена группы и отправляет данные всем членам группы.
 
         double Axb_chunk_norm_square = calc_norm_square(Axb_chunk, line_counts[process_rank]);
         MPI_Reduce(&Axb_chunk_norm_square, &accuracy, 1,
             MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
         if (process_rank == 0)
             accuracy = sqrt(accuracy) / b_norm;
-        MPI_Bcast(&accuracy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+        MPI_Bcast(&accuracy, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD); //Передает данные от одного участника группы всем членам группы.
     }
 
     finish_time = MPI_Wtime();
