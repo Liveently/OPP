@@ -90,9 +90,8 @@ int main(int argc, char *argv[]) {
     }
 
     if (rank == 0) { //здесь получаем кусочку матрицы для всех процессов и рассылаем
-        int y;
 
-        for (y = 1; y < P1 * P2; y++) {
+        for (int y = P1 * P2-1; y >=0 ; y--) {
             int divided_i = y / P2;
             int divided_j = y % P2;
 
@@ -116,23 +115,7 @@ int main(int argc, char *argv[]) {
                 MPI_Send(B_overall[i], overall_frame_x, MPI_DOUBLE, y, i, comm2d);
             }
         }
-
-
-        y=0;
-        int divided_i = y / P2;
-        int divided_j = y % P2;
-
-        for (int i = 0; i < overall_frame_y; i++) {
-            for (int j = 0; j < N2; j++) {
-                A_overall[i][j] = A[divided_i * overall_frame_y + i][j];
-            }
-        }
-        for (int i = 0; i < N2; i++) {
-            for (int j = 0; j < overall_frame_x; j++) {
-                B_overall[i][j] = B[i][overall_frame_x * divided_j + j];
-            }
-        }
-
+        
     }
 
 
@@ -149,17 +132,17 @@ int main(int argc, char *argv[]) {
 
 
     int amount = overall_frame_y * overall_frame_x;
-    double *C_all = (double *) malloc(amount * P1 * P2 * sizeof(double));
+    double *C_all = (double *) malloc(amount * P1 * P2 * sizeof(double)); // полная матрица
 
-    double **C_overall = (double **) malloc(N1 * sizeof(double *));
+    double **C_overall = (double **) malloc(N1 * sizeof(double *)); //тоже полная матрица
     for (int i = 0; i < N1; i++) {
         C_overall[i] = (double *) malloc(N3 * sizeof(double));
     }
 
-    double **C_sub = multiplying_matrixes(A_overall, B_overall, overall_frame_y, overall_frame_x);
+    double **C_sub = multiplying_matrixes(A_overall, B_overall, overall_frame_y, overall_frame_x);  //промежуточный результат умножения кусочков
 
     int k = 0;
-    double *C = (double *) malloc(amount * sizeof(double));
+    double *C = (double *) malloc(amount * sizeof(double)); //тоже самое что C_sub
     for (int i = 0; i < overall_frame_y; i++) {
         for (int j = 0; j < overall_frame_x; j++) {
             C[k] = C_sub[i][j];
@@ -167,7 +150,7 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    MPI_Gather(C, amount, MPI_DOUBLE, C_all, amount, MPI_DOUBLE, 0, comm2d); //Собирает данные от всех участников группы к одному участнику собираем C в С_all
+    MPI_Gather(C, amount, MPI_DOUBLE, C_all, amount, MPI_DOUBLE, 0, comm2d); //Собираем данные от всех участников группы к одному участнику собираем C в С_all
     int p = 0;
     int r = 0;
     if (rank == 0) {
@@ -192,11 +175,10 @@ int main(int argc, char *argv[]) {
     }
 
     finish_time = MPI_Wtime();
-
-
     
+
     if (rank == 0) {
-        
+
         int er=0;
 
         double **m_ = multiplying_matrixes(A, B, N1, N3);
@@ -204,14 +186,14 @@ int main(int argc, char *argv[]) {
         for (int i = 0; i < N1; i++)
             for (int j = 0; j < N3; j++)
                 if (C_overall[i][j] != m_[i][j]) er=1;
-        
+
 
         (er==0)?  printf("the calculation is correct \n") :  printf("the calculation is incorrect \n");
         printf("Time: %lf sec\n", finish_time - start_time);
 
     }
-    
-    
+
+
     MPI_Finalize();
     return 0;
 }
