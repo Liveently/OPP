@@ -1,190 +1,200 @@
+#include <cstring>
+#include <algorithm>
 #include <iostream>
-#include <cmath>
-#include "mpi.h"
+#include <math.h>
+#include <mpi.h>
 
-#define funcElement(i, x, y, z) functionIterations[i][(x) * Y * Z + (y) * Z + z]
-#define calculateP p(((x + displs[rank]) * hx) - 1, (y * hy) - 1, (z * hz) - 1, a)
-#define calculateF f(((x + displs[rank]) * hx) - 1, (y * hy) - 1, (z * hz) - 1)
-#define Nx 256
-#define Ny 256
-#define Nz 256
+using namespace std;
 
-inline double f(double x, double y, double z) {
-    return x * x + y * y + z * z;
+const double eps = 1e-8;
+const double a = 1e5;
+
+const int Nx = 256;
+const int Ny = 256;
+const int Nz = 256;
+
+const double min_x = -1, min_y = -1, min_z = -1;
+const double max_x = 1,  max_y = 1,  max_z = 1;
+
+
+double phi_finction(double x, double y, double z) {
+    return x*x+y*y+z*z;
 }
 
-inline double p(double x, double y, double z, double a) {
-    return 6 - a * f(x, y, z);
+double ro(double x, double y, double z) {
+    return 6-a*phi_finction(x,y,z);
 }
 
-int main(int argc, char *argv[]) {
+double update_layer(int base_z, int z, double* values, double* tmp_values, double hx, double hy, double hz) {
+    int abs_z = base_z+z;
+
+    if (abs_z==0 || abs_z==Nz-1) {  //если верх или низ
+        //Копируем этот слой в новый массив на старое место, не пересчитывая
+        memcpy(tmp_values + z*Nx*Ny, values + z*Nx*Ny, Nx * Ny * sizeof(double));
+        return 0;
+    }
+    //Иначе пересчитываем каждый элемент слоя с помощью итерационной формулы
+    double max_delta = 0;
+    double cur_z = min_z+abs_z*hz;
+    for (int i=0;i<Nx;i++) {
+        double cur_x = min_x+i*hx;
+        for (int j=0;j<Ny;j++) {
+            double cur_y = min_y+j*hy;
+            //Если элемент находится на границе слоя, то не пересчитываем его
+            if (i==0 || i==Nx-1 || j==0 || j==Ny-1) { //если боковые
+                tmp_values[z*Nx*Ny+i*Nx+j] = values[z*Nx*Ny+i*Nx+j];
+                continue;
+            }
+            int index = z*Nx*Ny+i*Nx+j;
+            double tmp = (values[z*Nx*Ny+(i+1)*Nx+j]+values[z*Nx*Ny+(i-1)*Nx+j])/(hx*hx);
+            tmp += (values[z*Nx*Ny+i*Nx+(j+1)]+values[z*Nx*Ny+i*Nx+(j-1)])/(hy*hy);
+            tmp += (values[(z+1)*Nx*Ny+i*Nx+j]+values[(z-1)*Nx*Ny+i*Nx+j])/(hz*hz);
+            tmp -= ro(cur_x, cur_y, cur_z);
+            tmp_values[index] = 1/(2/(hx*hx)+2/(hy*hy)+2/(hz*hz)+a);
+            tmp_values[index]*=tmp;
+            max_delta = max(max_delta, fabs(tmp_values[index]-values[index]));
+        }
+    }
+    return max_delta;
+}
+
+int main(int argc, char** argv) {
+    int size, rank;
+
     MPI_Init(&argc, &argv);
-    int procsCount, rank;
-    MPI_Comm_size(MPI_COMM_WORLD, &procsCount);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+    if (Nz % size) {  //нужно чтобы по z чётко делилось
+        if (rank == 0) {
+            cout << "Invalid number of processes" << endl;
+        }
+        MPI_Finalize();
+        return 0;
+    }
 
+    double start = MPI_Wtime();
+
+    double hx = (max_x - min_x) / (Nx - 1); //шаги сетки
+    double hy = (max_y - min_y) / (Ny - 1);
+    double hz = (max_z - min_z) / (Nz - 1);
+
+    int part_z = Nz / size; //часть по z в процессе
+
+    double* values = new double[(part_z + 2) * Nx * Ny];
+    double* tmp_values = new double[(part_z + 2) * Nx * Ny];
+
+    int base_z = rank * part_z-1;
+
+    //Инициализация слоя
+    for (int i = 0; i < part_z+2; i++) {
+        int real_i = i + base_z;
+        double cur_z = min_z + hz*real_i;
+        for (int j = 0; j < Nx; j++) {
+            double cur_x = min_x + hx*j;
+            for (int k = 0; k < Ny; k++) {
+                double cur_y = min_y + hy*k;
+                int index = i*Nx*Ny + j*Nx + k;
+
+                if (real_i == 0 || real_i == Nz-1 || j == 0 || j == Nx-1 || k == 0 || k == Ny-1) {
+                    values[index] = phi_finction(cur_x, cur_y, cur_z);
+                } else {
+                    values[index] = 0;
+                }
+            }
+        }
+    }
+
+
+    while(true) {
+        double max_delta = 0;
+
+        double tmp_delta = update_layer(base_z, 1, values, tmp_values, hx, hy, hz); //верх
+        max_delta = max(max_delta, tmp_delta);
+
+        tmp_delta = update_layer(base_z, part_z, values, tmp_values, hx, hy, hz); //низ
+        max_delta = max(max_delta, tmp_delta);
+
+        MPI_Request rq[4]; //хранят статус
+
+        if (rank != 0) {
+            MPI_Isend(tmp_values+Nx*Ny, Nx*Ny, MPI_DOUBLE, rank-1, 123, MPI_COMM_WORLD, &rq[0]);  //отправка + статус
+            MPI_Irecv(tmp_values, Nx*Ny, MPI_DOUBLE, rank-1, 123, MPI_COMM_WORLD, &rq[2]);
+        }
+
+        if (rank != size-1) {
+            MPI_Isend(tmp_values+part_z*Nx*Ny, Nx*Ny, MPI_DOUBLE, rank+1, 123, MPI_COMM_WORLD, &rq[1]);
+            MPI_Irecv(tmp_values+(part_z+1)*Nx*Ny, Nx*Ny, MPI_DOUBLE, rank+1, 123, MPI_COMM_WORLD, &rq[3]);
+        }
+
+        for (int i = 2; i < part_z; i++) {  //каждый слой внутри
+            double tmp_delta = update_layer(base_z, i, values, tmp_values, hx, hy, hz);
+            max_delta = max(max_delta, tmp_delta);
+        }
+
+        if (rank != 0) {  //точно должны получить
+            MPI_Wait(&rq[0], MPI_STATUS_IGNORE);
+            MPI_Wait(&rq[2], MPI_STATUS_IGNORE);
+        }
+
+        if (rank != size-1) {
+            MPI_Wait(&rq[1], MPI_STATUS_IGNORE);
+            MPI_Wait(&rq[3], MPI_STATUS_IGNORE);
+        }
+
+        memcpy(values, tmp_values, (part_z+2)*Nx*Ny*sizeof(double));  //скопировали в основное
+        double max_delta_shared;
+
+        MPI_Reduce(&max_delta, &max_delta_shared, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD); //выбираем макс
+
+        MPI_Bcast(&max_delta_shared, 1, MPI_DOUBLE, 0, MPI_COMM_WORLD);  //передает данные от одного участника группы всем членам группы
+
+        if (max_delta_shared < eps) {
+            break;
+        }
+    }
+
+    double* results;
+    if (rank == 0) {
+        results = new double[Nx*Ny*Nz];
+    }
+
+    MPI_Gather(values+Nx*Ny, part_z*Nx*Ny, MPI_DOUBLE, results, part_z*Nx*Ny, MPI_DOUBLE, 0, MPI_COMM_WORLD); //Собирает данные от всех участников группы к одному участнику.
+
+    if (rank == 0) { //грубо говоря проверка
+        double max_delta = 0;
+        for (int layer = 0;layer < Nz;layer++){
+            double z = min_z + layer*hz;
+            for (int j = 0;j < Nx;j++) {
+                double x= min_x + j*hx;
+                for (int k = 0; k < Ny; k++) {
+                    double y = min_y + k*hy;
+                    double tmp = results[layer*Nx*Ny + j*Nx + k];
+                    double val = phi_finction(x, y, z);
+                    max_delta = max(max_delta, fabs(tmp-val));
+                }
+            }
+        }
+
+
+        cout << "Delta: " << max_delta << endl;
+        if(max_delta < 100*eps){
+            cout << "Good" << endl;
+        }
+        else{
+            cout << "Bad" << endl;
+        }
+        delete[] results;
+    }
+
+    double end = MPI_Wtime();
 
     if (rank == 0) {
-        std::cout << "procsCount: " << procsCount << std::endl;
-        std::cout << "Grid size: " << Nx << "x" << Ny << "x" << Nz << std::endl;
+        printf("Time: %lf\n", end - start);
     }
 
-    int sizesPerThreads[procsCount], displs[procsCount];
-    std::fill(sizesPerThreads, sizesPerThreads + procsCount, Nx / procsCount);
-
-    for (int x = 0; x < Nx % procsCount; ++x) {  //распределили поровну, первым накинули по одному из остатка
-        sizesPerThreads[x] += 1;
-    }
-
-    displs[0] = 0;          //смещение
-    for (int x = 1; x < procsCount; ++x) {
-        displs[x] = displs[x - 1] + sizesPerThreads[x - 1];
-    }
-
-    const int X = sizesPerThreads[rank];
-    const int Y = Ny;
-    const int Z = Nz;
-
-    double *(functionIterations[2]);
-
-    functionIterations[0] = new double[X * Y * Z];
-    functionIterations[1] = new double[X * Y * Z];
-    std::fill(functionIterations[0], functionIterations[0] + X * Y * Z, 0);
-    std::fill(functionIterations[1], functionIterations[1] + X * Y * Z, 0);
-
-    auto leftBorder = new double[Z * Y];
-    auto rightBorder = new double[Z * Y];
-
-    const double hx = 2.0 / (Nx - 1);  //шаги сетки
-    const double hy = 2.0 / (Ny - 1);
-    const double hz = 2.0 / (Nz - 1);
-
-    const double hx2 = hx * hx;
-    const double hy2 = hy * hy;
-    const double hz2 = hz * hz;
-    const double a = 1e5; //параметр уравнения
-    const double factor = 1 / (2 / hx2 + 2 / hy2 + 2 / hz2 + a);
-
-    /// Fill borders on [-1;1]x[-1;1]x[-1;1]
-    for (int x = 0, localX = displs[rank]; x < X; ++x, ++localX) {
-        for (int y = 0; y < Y; y++) {
-            for (int z = 0; z < Z; z++) {
-                if ((localX == 0) || (y == 0) || (z == 0) || (localX == Nx - 1) || (y == Ny - 1) || (z == Nz - 1)) {
-                    funcElement(0, x, y, z) = f((localX * hx) - 1, (y * hy) - 1, (z * hz) - 1);
-                    funcElement(1, x, y, z) = f((localX * hx) - 1, (y * hy) - 1, (z * hz) - 1);
-                }
-            }
-        }
-    }
-
-    int newIter = 0, prevIter = 1;
-    double phix, phiy, phiz;
-
-    MPI_Request sendLeftBorder, sendRightBorder;
-    MPI_Request recvLeftBorder, recvRightBorder;
-
-    const double EPSILON = 1e-8;
-    int criteria = 1;
-
-    double time = -MPI_Wtime();
-    while (criteria) {
-        int tmpCriteria = 0;
-        newIter = 1 - newIter;
-        prevIter = 1 - prevIter;
-
-        /// Send borders
-        if (rank != 0) {
-            MPI_Isend(&(funcElement(prevIter, 0, 0, 0)), Y * Z, MPI_DOUBLE,
-                      rank - 1, 0, MPI_COMM_WORLD, &sendLeftBorder);
-            MPI_Irecv(leftBorder, Y * Z, MPI_DOUBLE, rank - 1, 1, MPI_COMM_WORLD, &recvLeftBorder);
-        }
-        if (rank != procsCount - 1) {
-            MPI_Isend(&(funcElement(prevIter, (sizesPerThreads[rank] - 1), 0, 0)), Y * Z, MPI_DOUBLE,
-                      rank + 1, 1, MPI_COMM_WORLD, &sendRightBorder);
-            MPI_Irecv(rightBorder, Y * Z, MPI_DOUBLE, rank + 1, 0, MPI_COMM_WORLD, &recvRightBorder);
-        }
-
-        /// Calculate subregions
-        for (int x = 1; x < X - 1; ++x) {
-            for (int y = 1; y < Y - 1; ++y) {
-                for (int z = 1; z < Z - 1; ++z) {
-                    phix = (funcElement(prevIter, x - 1, y, z) + funcElement(prevIter, x + 1, y, z)) / hx2;
-                    phiy = (funcElement(prevIter, x, y - 1, z) + funcElement(prevIter, x, y + 1, z)) / hy2;
-                    phiz = (funcElement(prevIter, x, y, z - 1) + funcElement(prevIter, x, y, z + 1)) / hz2;
-                    double element = factor * (phix + phiy + phiz - calculateP);
-                    funcElement(newIter, x, y, z) = element;
-
-                    tmpCriteria = fabs(element - calculateF) > EPSILON ? 1 : 0;
-                }
-            }
-        }
-
-        /// Wait for borders
-        if (rank != 0) {
-            MPI_Wait(&sendLeftBorder, MPI_STATUS_IGNORE);
-            MPI_Wait(&recvLeftBorder, MPI_STATUS_IGNORE);
-        }
-        if (rank != procsCount - 1) {
-            MPI_Wait(&sendRightBorder, MPI_STATUS_IGNORE);
-            MPI_Wait(&recvRightBorder, MPI_STATUS_IGNORE);
-        }
-
-        /// Calculate borders
-        for (int y = 1; y < Y - 1; ++y) {
-            for (int z = 1; z < Z - 1; ++z) {
-                /// Left border
-                if (rank != 0) {
-                    int x = 0;
-                    phix = (leftBorder[y * Z + z] + funcElement(prevIter, x + 1, y, z)) / hx2;
-                    phiy = (funcElement(prevIter, x, y - 1, z) + funcElement(prevIter, x, y + 1, z)) / hy2;
-                    phiz = (funcElement(prevIter, x, y, z - 1) + funcElement(prevIter, x, y, z + 1)) / hz2;
-                    double element = factor * (phix + phiy + phiz - calculateP);
-                    funcElement(newIter, x, y, z) = element;
-
-                    tmpCriteria = fabs(element - calculateF) > EPSILON ? 1 : 0;
-                }
-
-                /// Right border
-                if (rank != procsCount - 1) {
-                    int x = X - 1;
-                    phix = (funcElement(prevIter, x - 1, y, z) + rightBorder[y * Z + z]) / hx2;
-                    phiy = (funcElement(prevIter, x, y - 1, z) + funcElement(prevIter, x, y + 1, z)) / hy2;
-                    phiz = (funcElement(prevIter, x, y, z - 1) + funcElement(prevIter, x, y, z + 1)) / hz2;
-                    double element = factor * (phix + phiy + phiz - calculateP);
-                    funcElement(newIter, x, y, z) = element;
-
-                    tmpCriteria = fabs(element - calculateF) > EPSILON ? 1 : 0;
-                }
-            }
-        }
-        MPI_Allreduce(&tmpCriteria, &criteria, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-    }
-    time += MPI_Wtime();
-
-    double tmpMax = 0, abs;
-    for (int x = 1; x < X - 1; ++x) {
-        for (int y = 1; y < Y - 1; ++y) {
-            for (int z = 1; z < Z - 1; ++z) {
-                if ((abs = fabs(funcElement(newIter, x, y, z) - calculateF)) > tmpMax) {
-                    tmpMax = abs;
-                }
-            }
-        }
-    }
-
-    double max;
-    MPI_Allreduce(&tmpMax, &max, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-
-    if (rank == 0) {
-        std::cout << "Time: " << time << std::endl;
-        std::cout << "Max difference: " << max << std::endl;
-    }
-
-    delete[] functionIterations[0];
-    delete[] functionIterations[1];
-    delete[] leftBorder;
-    delete[] rightBorder;
+    delete[](values);
+    delete[](tmp_values);
 
     MPI_Finalize();
     return 0;
