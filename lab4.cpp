@@ -9,7 +9,7 @@ using namespace std;
 const double eps = 1e-8;
 const double a = 1e5;
 
-const int Nx = 256;
+const int Nx = 126;
 const int Ny = 256;
 const int Nz = 256;
 
@@ -42,13 +42,13 @@ double update_layer(int base_z, int z, double* values, double* tmp_values, doubl
             double cur_y = min_y+j*hy;
             //Если элемент находится на границе слоя, то не пересчитываем его
             if (i==0 || i==Nx-1 || j==0 || j==Ny-1) { //если боковые
-                tmp_values[z*Nx*Ny+i*Nx+j] = values[z*Nx*Ny+i*Nx+j];
+                tmp_values[z*Nx*Ny+i*Ny+j] = values[z*Nx*Ny+i*Ny+j];
                 continue;
             }
-            int index = z*Nx*Ny+i*Nx+j;
-            double tmp = (values[z*Nx*Ny+(i+1)*Nx+j]+values[z*Nx*Ny+(i-1)*Nx+j])/(hx*hx);
-            tmp += (values[z*Nx*Ny+i*Nx+(j+1)]+values[z*Nx*Ny+i*Nx+(j-1)])/(hy*hy);
-            tmp += (values[(z+1)*Nx*Ny+i*Nx+j]+values[(z-1)*Nx*Ny+i*Nx+j])/(hz*hz);
+            int index = z*Nx*Ny+i*Ny+j;
+            double tmp = (values[z*Nx*Ny+(i+1)*Ny+j]+values[z*Nx*Ny+(i-1)*Ny+j])/(hx*hx);
+            tmp += (values[z*Nx*Ny+i*Ny+(j+1)]+values[z*Nx*Ny+i*Ny+(j-1)])/(hy*hy);
+            tmp += (values[(z+1)*Nx*Ny+i*Ny+j]+values[(z-1)*Nx*Ny+i*Ny+j])/(hz*hz);
             tmp -= ro(cur_x, cur_y, cur_z);
             tmp_values[index] = 1/(2/(hx*hx)+2/(hy*hy)+2/(hz*hz)+a);
             tmp_values[index]*=tmp;
@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
             double cur_x = min_x + hx*j;
             for (int k = 0; k < Ny; k++) {
                 double cur_y = min_y + hy*k;
-                int index = i*Nx*Ny + j*Nx + k;
+                int index = i*Nx*Ny + j*Ny + k;
 
                 if (real_i == 0 || real_i == Nz-1 || j == 0 || j == Nx-1 || k == 0 || k == Ny-1) {
                     values[index] = phi_finction(cur_x, cur_y, cur_z);
@@ -154,6 +154,8 @@ int main(int argc, char** argv) {
         }
     }
 
+    double end = MPI_Wtime();
+
     double* results;
     if (rank == 0) {
         results = new double[Nx*Ny*Nz];
@@ -161,7 +163,7 @@ int main(int argc, char** argv) {
 
     MPI_Gather(values+Nx*Ny, part_z*Nx*Ny, MPI_DOUBLE, results, part_z*Nx*Ny, MPI_DOUBLE, 0, MPI_COMM_WORLD); //Собирает данные от всех участников группы к одному участнику.
 
-    if (rank == 0) { //грубо говоря проверка
+    if (rank == 0) {
         double max_delta = 0;
         for (int layer = 0;layer < Nz;layer++){
             double z = min_z + layer*hz;
@@ -169,7 +171,7 @@ int main(int argc, char** argv) {
                 double x= min_x + j*hx;
                 for (int k = 0; k < Ny; k++) {
                     double y = min_y + k*hy;
-                    double tmp = results[layer*Nx*Ny + j*Nx + k];
+                    double tmp = results[layer*Nx*Ny + j*Ny + k];
                     double val = phi_finction(x, y, z);
                     max_delta = max(max_delta, fabs(tmp-val));
                 }
@@ -187,7 +189,7 @@ int main(int argc, char** argv) {
         delete[] results;
     }
 
-    double end = MPI_Wtime();
+
 
     if (rank == 0) {
         printf("Time: %lf\n", end - start);
