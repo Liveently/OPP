@@ -1,5 +1,4 @@
 #include <cstring>
-#include <algorithm>
 #include <iostream>
 #include <math.h>
 #include <mpi.h>
@@ -9,9 +8,9 @@ using namespace std;
 const double eps = 1e-8;
 const double a = 1e5;
 
-const int Nx = 113;
-const int Ny = 115;
-const int Nz = 111;
+const int Nx = 121;
+const int Ny = 143;
+const int Nz = 167;
 
 const double min_x = -1, min_y = -1, min_z = -1;
 const double max_x = 1,  max_y = 1,  max_z = 1;
@@ -162,7 +161,7 @@ int main(int argc, char** argv) {
 
         if (max_delta_shared < eps) {
             break;
-        }
+       }
     }
 
     double end = MPI_Wtime();
@@ -172,7 +171,16 @@ int main(int argc, char** argv) {
         results = new double[Nx*Ny*Nz];
     }
 
-    MPI_Gather(values+Nx*Ny, sizesPerThreads[rank]*Nx*Ny, MPI_DOUBLE, results, sizesPerThreads[rank]*Nx*Ny, MPI_DOUBLE, 0, MPI_COMM_WORLD); //Собирает данные от всех участников группы к одному участнику.
+int sz[size];
+    for (int i = 0; i < size; ++i) {
+        sz[i] = sizesPerThreads[i]*Nx*Ny;
+displs[i]++;
+        displs[i]=displs[i]*Nx*Ny;
+    }
+
+    MPI_Gatherv(values+Nx*Ny, sizesPerThreads[rank]*Nx*Ny, MPI_DOUBLE, results, sz, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); //Собирает данные от всех участников группы
+
+
 
     if (rank == 0) {
         double max_delta = 0;
@@ -188,6 +196,7 @@ int main(int argc, char** argv) {
                 }
             }
         }
+
 
         cout << "Delta: " << max_delta << endl;
         if(max_delta < eps){
