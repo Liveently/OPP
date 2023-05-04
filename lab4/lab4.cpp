@@ -171,15 +171,14 @@ int main(int argc, char** argv) {
         results = new double[Nx*Ny*Nz];
     }
 
-int sz[size];
+    int sz[size];
     for (int i = 0; i < size; ++i) {
         sz[i] = sizesPerThreads[i]*Nx*Ny;
-displs[i]++;
+        displs[i]++;
         displs[i]=displs[i]*Nx*Ny;
     }
 
     MPI_Gatherv(values+Nx*Ny, sizesPerThreads[rank]*Nx*Ny, MPI_DOUBLE, results, sz, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD); //Собирает данные от всех участников группы
-
 
 
     if (rank == 0) {
@@ -207,7 +206,6 @@ displs[i]++;
         }
         delete []results;
     }
-
 
 
     if (rank == 0) {
