@@ -57,7 +57,10 @@ void SendPartMatrixA(const int* coords, int send_count, int recv_count, double* 
     {
         MPI_Scatter(A, send_count, MPI_DOUBLE, A_part, recv_count, MPI_DOUBLE, 0, column_comm); //Each column_comm has its own "root" == 0 process
                                                                                     //Распределяет данные от одного члена по всем членам групп
+                                                                                    //Функция распределения блоков данных по всем процессам группы
+                                                                                    // Рассылаем в ячейки слева для начала
     }
+
     MPI_Bcast(A_part, send_count, MPI_DOUBLE, 0, row_comm);//Each row_comm has its own "root" == 0 process
                                                        //Передает данные от одного участника группы всем членам группы.
 }
@@ -66,9 +69,13 @@ void SendPartMatrixB(const int* coords, int B_x, int B_y, int B_part_x, int B_pa
 {
     //Creating column type
     MPI_Datatype column, column_type;
-    MPI_Type_vector(B_y, B_part_x, B_x, MPI_DOUBLE, &column);
-    MPI_Type_commit(&column);
-    MPI_Type_create_resized(column, 0, B_part_x * sizeof(double), &column_type);
+    MPI_Type_vector(B_y, B_part_x, B_x, MPI_DOUBLE, &column); //b_y элементов в векторе, B_part_x в каждом блоке,  B_x шаг
+    MPI_Type_commit(&column); //фиксирует Объект типа данных должен быть зафиксирован, прежде чем его можно будет использовать в обмене данными.
+
+    MPI_Type_create_resized(column, 0, B_part_x * sizeof(double), &column_type); //преобразуем column в column_type
+    //в общем случае приходится корректировать длину структурированного типа, чтобы учесть любое завершающее дополнение, которое компилятор может вставить в конец структуры
+    //Это вляет на поведение типа данных при передаче
+    
     MPI_Type_commit(&column_type);
 
     if (coords[0] == 0) //For processes from 1st row 2D lattice
@@ -149,7 +156,7 @@ int CheckAnsw(int A_x, int A_y, int B_x, double* A, double* B, double* C)
 int main(int argc, char* argv[])
 {
 
-    int dims[2] = { P1, P2 }, periods[2] = { 0, 0 };
+    int dims[2] = { P1, P2 }, periods[2] = { 0, 0 }; //размер решетки и зацикливание в поле сетки??
 
     int coords[2], varying_coords[2];
     int reorder = 0;
@@ -165,7 +172,7 @@ int main(int argc, char* argv[])
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    
+
     int A_part_x = N1;
     int A_part_y = N2 / P1;
     int B_part_x = N3 / P2;
@@ -181,9 +188,10 @@ int main(int argc, char* argv[])
     auto C_part = new double[A_part_y * B_part_x];
 
     //Creating a communicator
-    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm2d);
+    MPI_Cart_create(MPI_COMM_WORLD, 2, dims, periods, reorder, &comm2d); //Функция создания коммуникатора с декартовой топологией
+                                                                     //создаёт коммуникатор решётки так чтобы процессы в рамках решетки могли коммуницироать со своими соседями
     MPI_Comm_rank(comm2d, &rank);
-    MPI_Cart_coords(comm2d, rank, 2, coords);
+    MPI_Cart_coords(comm2d, rank, 2, coords); //запись координат в зависимости от rank
 
     //Creating a subcommunicator for rows
     varying_coords[0] = 0;
@@ -200,7 +208,6 @@ int main(int argc, char* argv[])
     {
         InitMatrices(N1, N2, A, N3, N1, B);
     }
-
 
     start = MPI_Wtime();
 
