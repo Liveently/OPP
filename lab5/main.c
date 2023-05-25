@@ -4,13 +4,13 @@
 #include <math.h>
 #include <mpi.h>
 
-int iterCounter = 4;
-int L = 500;
+int iterCounter = 1; //кол-во списков
+int L = 5;  //параметр веса
 int *task_list;
-int nextPosition;
+int currPosition;
 
 double globalRes = 0;
-int tasksCount = 28000;
+int tasksCount = 20000;
 int processTasksCount;
 int iterTaskCount;
 
@@ -22,9 +22,13 @@ pthread_mutex_t mutex;
 
 
 
-void initList(int *taskList, int procTaskCount, int iterCount){ //вес задач инициализации
-    for(int i = 0; i < procTaskCount; i++){
-        taskList[i] = abs(50 - i%100)*abs(rank - (iterCount % size))*L;
+void initList(int *taskList, int iterCount){ //вес задач инициализации
+
+    int tmp = rank * processTasksCount;
+
+    for(int i = 0; i < processTasksCount; i++){
+        taskList[i] = tmp * iterCount * L;
+        tmp++;
     }
 }
 
@@ -46,16 +50,16 @@ void* doTasks(void* args){
 
     while (currListNum != iterCounter){
 
-        initList(task_list, processTasksCount, currListNum);
+        initList( task_list, currListNum);
         iterationCompletedTasksNum = 0;
-        nextPosition = 0;
+        currPosition = 0;
         start_iteration = MPI_Wtime();
         iterTaskCount = processTasksCount;
 
         while(iterTaskCount != 0){
             pthread_mutex_lock(&mutex); //блокирование очереди задач
-            int weight = task_list[nextPosition]; //вес текущ задачи
-            nextPosition++;
+            int weight = task_list[currPosition]; //вес текущ задачи
+            currPosition++;
             iterTaskCount--;
             pthread_mutex_unlock(&mutex); //разблокировка очереди задач
 
@@ -68,22 +72,23 @@ void* doTasks(void* args){
 
 
         for(int i = 0; i < size; i++){
-            request = 1;
+
+            request = 1; // запрос
 
             if((rank + i) % size != rank){
                 while(1){
 
                     MPI_Send(&request, 1, MPI_INT, (rank + i) % size, 0, MPI_COMM_WORLD);
 
-                    int response;
+                    int response; //ответ
 
 
                     MPI_Recv(&response, 1, MPI_INT, (rank + i) % size, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
 
-                    if(response != -1){
+                    if(response != -1){ //кол-во принятых тасков
                         int *response_tasks = (int*)malloc(sizeof(int)*response);
-                        MPI_Recv(response_tasks, response, MPI_INT, (rank + i) % size, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                        MPI_Recv(response_tasks, response, MPI_INT, (rank + i) % size, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE); //Выполняет операцию получения
 
                         for(int j = 0; j < response; j++){
                             for(int k = 0; k < response_tasks[j]; k++){
@@ -100,13 +105,14 @@ void* doTasks(void* args){
         }
 
         end_iteration = MPI_Wtime();
+
         double iterationTimeProc =  end_iteration - start_iteration;
         printf("Process#%d | TasksIterationCount:%d | IterationTime:%f\n", rank, iterationCompletedTasksNum, iterationTimeProc);
 
         MPI_Allreduce(&iterationTimeProc, &time_m, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD); // Объединяет значения из всех процессов и распределяет результат обратно во все процессы.
         MPI_Allreduce(&iterationTimeProc, &time_n, 1, MPI_DOUBLE, MPI_MIN, MPI_COMM_WORLD); // Ищем мин и макс время
 
-        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Barrier(MPI_COMM_WORLD); //дождаться всех
 
         if(rank == 0){
             printf("Imbalance:%f\n", time_m - time_n);
@@ -139,7 +145,7 @@ void* sendTask(void* args){
 
         MPI_Recv(&request, 1, MPI_INT, MPI_ANY_SOURCE, 0, MPI_COMM_WORLD, &status);
 
-        if(request == 0)break;
+        if(request == 0) break;
 
         pthread_mutex_lock(&mutex);
         int* sendTasks;
@@ -149,8 +155,8 @@ void* sendTask(void* args){
 
             sendTasks = (int*)malloc(sizeof(int)*response);
             for(int i = 0; i < response; i++){
-                sendTasks[i] = task_list[nextPosition];
-                nextPosition++;
+                sendTasks[i] = task_list[currPosition];
+                currPosition++;
                 iterTaskCount--;
             }
         }
@@ -180,7 +186,7 @@ void createThreads(){
 
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
 
-    pthread_create(&threads[0], &attr, doTasks, NULL); // создание потока получения
+    pthread_create(&threads[0], &attr, doTasks, NULL); // создание потока
     pthread_create(&threads[1], &attr, sendTask, NULL);
 
     pthread_attr_destroy(&attr);  //уничтожение атрибутов
@@ -206,7 +212,7 @@ int main(int argc, char** argv) {
     }
 
     pthread_mutex_init(&mutex, NULL);
-    processTasksCount = tasksCount / size;
+
 
     if (rank < tasksCount % size) {
         processTasksCount = tasksCount / size + 1;
@@ -219,7 +225,7 @@ int main(int argc, char** argv) {
 
     start = MPI_Wtime();
 
-    createThreads();
+    createThreads();  //создаем 2 потока
     end = MPI_Wtime();
 
     double time = end - start;
